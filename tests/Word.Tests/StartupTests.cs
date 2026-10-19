@@ -33,6 +33,16 @@ public sealed class StartupTests
     public void Only_pane_close_buttons_are_eligible(string name, bool expected) =>
         Assert.That(OfficeStartup.IsPaneCloseButton(name), Is.EqualTo(expected));
 
+    [TestCase("Copilot", "sessionPaneCloseButton", true)]
+    [TestCase("copilot", "sessionPaneCloseButton", true)]
+    [TestCase("OfficePLUS", "sessionPaneCloseButton", false)]
+    [TestCase("Find and Replace", "sessionPaneCloseButton", false)]
+    [TestCase("Copilot", "Close", false)]
+    [TestCase("Copilot", "", false)]
+    public void Modern_chat_close_requires_Copilot_and_exact_control_id(
+        string paneName, string automationId, bool expected) =>
+        Assert.That(OfficeStartup.IsCopilotChatCloseButton(paneName, automationId), Is.EqualTo(expected));
+
     private static void Wait(Func<bool> condition, string description) =>
         OfficeStartup.WaitFor(condition, description, TimeSpan.FromMilliseconds(100), _ => { });
 

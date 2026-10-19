@@ -18,6 +18,10 @@ public static class OfficeStartup
     public static bool IsPaneCloseButton(string name) =>
         name is "Close pane" or "\u5173\u95ed\u7a97\u683c";
 
+    public static bool IsCopilotChatCloseButton(string paneName, string automationId) =>
+        paneName.Equals("Copilot", StringComparison.OrdinalIgnoreCase) &&
+        automationId == "sessionPaneCloseButton";
+
     public static bool IsVisiblyOpen(bool? isOffscreen, bool? nativeWindowVisible,
         Rectangle bounds, Rectangle officeBounds)
     {

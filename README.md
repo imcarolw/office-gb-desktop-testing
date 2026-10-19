@@ -86,6 +86,8 @@ listed cases are implemented; other case IDs are not supported.
   font to manufacture a pass.
 - The known "Cloud Create Onboarding" dialog is closed through its Close button
   only when present, without opting into cloud saving or changing preferences.
+  It is checked again during pane-close waits, since it can appear after the
+  presentation and its panes have started loading.
 - After creating or opening a document, the runner also dismisses visible
   OfficePLUS/Copilot task panes identified by their exact Office pane markers
   inside the test-owned application. Already-closed panes require no action.
@@ -95,7 +97,10 @@ listed cases are implemented; other case IDs are not supported.
   window owned by the test process can supply that evidence instead. Hidden panes
   and stale/unknown entries are not closed merely because their names exist.
   It invokes only the Close pane button in that pane's matching named native
-  header, outside embedded web content. It never uses
+  header, outside embedded web content, or the exact `sessionPaneCloseButton`
+  inside the identified Copilot pane for newer web-based Copilot chat.
+  Pane discovery waits for the main window to return during pane transitions
+  rather than treating a temporarily missing window as a closed pane. It never uses
   the application's title-bar Close button, disables add-ins, or edits Office
   preferences. Other unexpected dialogs remain explicit failures.
 - Startup waits for the actual document (native Word/Excel editing surface or

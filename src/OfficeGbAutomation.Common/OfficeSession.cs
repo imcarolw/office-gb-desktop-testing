@@ -208,8 +208,15 @@ public sealed class OfficeSession : IDisposable
 
     private (string Name, AutomationElement Host)[] KnownTaskPanes()
     {
+        Window? window = null;
+        Wait(() =>
+        {
+            DismissCloudOnboarding();
+            window = MainWindow();
+            return window is not null;
+        }, "Office main window after startup dialogs or pane transitions");
         var result = new List<(string, AutomationElement)>();
-        foreach (var host in Window.FindAllDescendants(cf => cf.ByClassName("MsoWorkPane")))
+        foreach (var host in window!.FindAllDescendants(cf => cf.ByClassName("MsoWorkPane")))
         {
             if (host.Properties.ProcessId.ValueOrDefault != Application.ProcessId || !IsVisiblyOpen(host))
                 continue;
@@ -234,13 +241,25 @@ public sealed class OfficeSession : IDisposable
                         return true;
                     if (panes.Length != 1)
                         throw new InvalidOperationException($"Multiple {name} task panes found; refusing an ambiguous Close action.");
-                    return TryCloseTaskPane(name);
+                    return TryCloseTaskPane(name, panes[0].Host);
                 }, Wait, LogStartup);
         }
     }
 
-    private bool TryCloseTaskPane(string name)
+    private bool TryCloseTaskPane(string name, AutomationElement host)
     {
+        var chatButtons = host.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+            .Where(e => OfficeStartup.IsCopilotChatCloseButton(name, Id(e)) &&
+                IsVisiblyOpen(e) && e.Properties.IsEnabled.ValueOrDefault &&
+                e.Patterns.Invoke.IsSupported).ToArray();
+        if (chatButtons.Length > 1)
+            throw new InvalidOperationException("Multiple Copilot chat Close buttons found; refusing an ambiguous Close action.");
+        if (chatButtons.Length == 1)
+        {
+            LogStartup("Closing Copilot chat through its pane-scoped sessionPaneCloseButton.");
+            chatButtons[0].Patterns.Invoke.Pattern.Invoke();
+            return true;
+        }
         // Office exposes a task pane's header separately from its content window.
         var headers = Window.FindAllDescendants(cf => cf.ByClassName("NetUINativeHWNDHost"))
             .Where(e => OfficeStartup.IsPaneHeader(Class(e), Name(e), name) &&
