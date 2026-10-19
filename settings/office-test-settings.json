@@ -1,0 +1,6 @@
+{
+  "officeDirectory": "",
+  "artifactRoot": "artifacts",
+  "uiTimeoutSeconds": 30,
+  "expectedPowerPointFonts": [ "Deng Xian", "Deng Xian Light", "DengXian", "DengXian Light", "等线", "等线 Light" ]
+}

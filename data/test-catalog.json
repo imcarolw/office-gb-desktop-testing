@@ -1,0 +1,56 @@
+[
+  {
+    "application": "Word",
+    "caseId": 5842,
+    "title": "Template search displays GB characters",
+    "aliases": ["template search", "new document search", "Word search"],
+    "project": "tests\\Word.Tests\\Word.Tests.csproj",
+    "testName": "Case5842_Template_search_displays_GB_characters",
+    "expectedSteps": 4
+  },
+  {
+    "application": "Word",
+    "caseId": 5844,
+    "title": "Save As preserves GB content and filename",
+    "aliases": ["save as", "GB filename", "save document"],
+    "project": "tests\\Word.Tests\\Word.Tests.csproj",
+    "testName": "Case5844_Save_As_preserves_GB_content_and_filename",
+    "expectedSteps": 6
+  },
+  {
+    "application": "Excel",
+    "caseId": 6841,
+    "title": "Options display GB workbook and worksheet names",
+    "aliases": ["advanced options", "worksheet names", "workbook names", "AutoRecover"],
+    "project": "tests\\Excel.Tests\\Excel.Tests.csproj",
+    "testName": "Case6841_Advanced_options_display_GB_workbook_and_sheet_names",
+    "expectedSteps": 8
+  },
+  {
+    "application": "Excel",
+    "caseId": 5881,
+    "title": "Horizontal and vertical text boxes display GB characters",
+    "aliases": ["text box", "text boxes", "horizontal text", "vertical text"],
+    "project": "tests\\Excel.Tests\\Excel.Tests.csproj",
+    "testName": "Case5881_Horizontal_and_vertical_text_boxes_display_GB_characters",
+    "expectedSteps": 4
+  },
+  {
+    "application": "PowerPoint",
+    "caseId": 5921,
+    "title": "Find and Replace preserves GB characters",
+    "aliases": ["find and replace", "replace text", "find next"],
+    "project": "tests\\PowerPoint.Tests\\PowerPoint.Tests.csproj",
+    "testName": "Case5921_Find_and_replace_preserve_GB_characters",
+    "expectedSteps": 12
+  },
+  {
+    "application": "PowerPoint",
+    "caseId": 6295,
+    "title": "Title and subtitle use the expected default Han font",
+    "aliases": ["default font", "Deng Xian", "DengXian", "title and subtitle"],
+    "project": "tests\\PowerPoint.Tests\\PowerPoint.Tests.csproj",
+    "testName": "Case6295_Title_and_subtitle_use_expected_default_East_Asian_font",
+    "expectedSteps": 4
+  }
+]

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OfficeGbAutomation.Common/OfficeGbAutomation.Common.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Word.Tests/Word.Tests.csproj" />
+    <Project Path="tests/Excel.Tests/Excel.Tests.csproj" />
+    <Project Path="tests/PowerPoint.Tests/PowerPoint.Tests.csproj" />
+  </Folder>
+</Solution>
