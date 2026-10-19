@@ -85,8 +85,27 @@ listed cases are implemented; other case IDs are not supported.
   legitimately fail the legacy Deng Xian expectation. The test never forces a
   font to manufacture a pass.
 - The known "Cloud Create Onboarding" dialog is closed through its Close button
-  without opting into cloud saving or changing preferences. Other unexpected
-  dialogs remain explicit failures.
+  only when present, without opting into cloud saving or changing preferences.
+- After creating or opening a document, the runner also dismisses visible
+  OfficePLUS/Copilot task panes identified by their exact Office pane markers
+  inside the test-owned application. Already-closed panes require no action.
+  Pane content, headers, and Close buttons must have nonempty bounds intersecting
+  the Office window and positive visibility evidence. An unsupported UI Automation
+  offscreen property is not treated as visible; a matching, visible native child
+  window owned by the test process can supply that evidence instead. Hidden panes
+  and stale/unknown entries are not closed merely because their names exist.
+  It invokes only the Close pane button in that pane's matching named native
+  header, outside embedded web content. It never uses
+  the application's title-bar Close button, disables add-ins, or edits Office
+  preferences. Other unexpected dialogs remain explicit failures.
+- Startup waits for the actual document (native Word/Excel editing surface or
+  a PowerPoint presentation containing a slide) and the visible Home/File ribbon.
+  Only known transient UI Automation/Office-busy COM errors are retried within
+  the configured wait timeout; other errors propagate immediately.
+- If an optional pane cannot be closed safely, keeps reopening, or leaves Office
+  controls inaccessible, the run fails with diagnostics. Close the pane manually
+  and investigate add-in compatibility; closing a pane cannot guarantee recovery
+  from an add-in that disrupts Office accessibility.
 - Desktop screenshots may include pixels behind overlapping Office windows.
   Use a clean test desktop without sensitive content.
 
@@ -278,3 +297,10 @@ without reviewing them for private information.
 Office versions, language, fonts, and desktop state can affect UI results.
 Always use the fresh summary from your own run; automated success is not a
 guarantee of visual glyph correctness.
+
+Startup retries and pane dismissals are recorded in the console and in the case
+report's `Observations.StartupHandling`. Failure screenshots and `failure-ui.txt`
+remain local diagnostics. The automated startup tests cover pane absence,
+closure, missing Close controls, failed closure, exact marker selection, and
+transient-error handling. Testing against a real OfficePLUS installation is
+still required to verify compatibility with that add-in's particular version.

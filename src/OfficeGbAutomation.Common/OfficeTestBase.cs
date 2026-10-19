@@ -117,6 +117,8 @@ public abstract class OfficeTestBase
             }
             finally
             {
+                if (session.StartupDiagnostics.Count > 0)
+                    evidence.Result.Observations["StartupHandling"] = string.Join(Environment.NewLine, session.StartupDiagnostics);
                 evidence.Complete(failure);
                 desktopLock?.Dispose();
                 TestContext.Progress.WriteLine($"Case {caseId}: {evidence.Result.Status}. Evidence: {directory}");

@@ -17,6 +17,7 @@ public sealed class OfficeSession : IDisposable
     private readonly OfficeSettings settings;
     private readonly string appName;
     private Application? application;
+    public List<string> StartupDiagnostics { get; } = [];
     public UIA3Automation Automation { get; } = new();
     public Application Application => application ?? throw new InvalidOperationException("Office has not launched.");
     private string MainWindowClass => appName switch
@@ -64,21 +65,25 @@ public sealed class OfficeSession : IDisposable
             start.ArgumentList.Add("/x");
         application = Application.Launch(start);
         Wait(() => MainWindow() is not null, "Office main window (not splash screen)");
-        Window.Focus();
-        if (Window.Patterns.Window.IsSupported && Window.Patterns.Window.Pattern.CanMaximize.Value)
-            Window.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
+        Wait(() =>
+        {
+            Window.Focus();
+            if (Window.Patterns.Window.IsSupported && Window.Patterns.Window.Pattern.CanMaximize.Value)
+                Window.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Maximized);
+            return true;
+        }, "Office main window to accept focus");
     }
 
     public void Wait(Func<bool> condition, string description)
     {
-        var timer = Stopwatch.StartNew();
-        while (timer.Elapsed < TimeSpan.FromSeconds(settings.UiTimeoutSeconds))
-        {
-            if (condition())
-                return;
-            Thread.Sleep(150);
-        }
-        throw new TimeoutException($"Timed out waiting for {description}.");
+        OfficeStartup.WaitFor(condition, description, TimeSpan.FromSeconds(settings.UiTimeoutSeconds),
+            LogStartup);
+    }
+
+    private void LogStartup(string message)
+    {
+        StartupDiagnostics.Add(message);
+        NUnit.Framework.TestContext.Progress.WriteLine(message);
     }
 
     public AutomationElement Find(Func<AutomationElement, bool> predicate, string description)
@@ -130,7 +135,13 @@ public sealed class OfficeSession : IDisposable
             "Excel" => new[] { "Blank workbook", "\u7a7a\u767d\u5de5\u4f5c\u7c3f" },
             _ => new[] { "Blank Presentation", "Blank presentation", "\u7a7a\u767d\u6f14\u793a\u6587\u7a3f" }
         };
-        var blank = Elements().FirstOrDefault(e => labels.Contains(Name(e), StringComparer.OrdinalIgnoreCase));
+        AutomationElement? blank = null;
+        Wait(() =>
+        {
+            DismissCloudOnboarding();
+            blank = Elements().FirstOrDefault(e => labels.Contains(Name(e), StringComparer.OrdinalIgnoreCase));
+            return true;
+        }, "Office start screen inspection");
         if (blank is not null)
             Activate(blank);
         else
@@ -138,20 +149,148 @@ public sealed class OfficeSession : IDisposable
             Window.Focus();
             Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_N);
         }
-        Wait(() =>
+        PrepareDocument();
+    }
+
+    private void PrepareDocument()
+    {
+        var stable = Stopwatch.StartNew();
+        var wasReady = false;
+        var lastState = "Document not yet inspected.";
+        try
         {
-            DismissCloudOnboarding();
-            return appName switch
+            Wait(() =>
             {
-                "Word" => Elements().Any(e => Class(e) == "_WwG"),
-                "Excel" => Elements().Any(e => Type(e) == ControlType.DataGrid),
-                _ => Elements().Any(e => Name(e).Contains("Slide", StringComparison.OrdinalIgnoreCase)
-                    || Name(e).Contains("\u5e7b\u706f\u7247", StringComparison.Ordinal))
-            };
-        }, "blank document editing surface");
-        Thread.Sleep(500);
-        DismissCloudOnboarding();
+                DismissCloudOnboarding();
+                DismissKnownTaskPanes();
+                var elements = Elements().ToArray();
+                var file = elements.Any(e => Id(e) == "FileTabButton" && !e.Properties.IsOffscreen.ValueOrDefault);
+                var home = elements.Any(e => Type(e) == ControlType.TabItem && !e.Properties.IsOffscreen.ValueOrDefault &&
+                    (Name(e) == "Home" || Name(e) == "\u5f00\u59cb"));
+                var document = HasEditingDocument();
+                lastState = $"Editing document: {document}; File tab: {file}; Home tab: {home}.";
+                if (!document || !file || !home)
+                {
+                    wasReady = false;
+                    return false;
+                }
+                if (!wasReady)
+                {
+                    stable.Restart();
+                    wasReady = true;
+                }
+                return stable.ElapsedMilliseconds >= 500;
+            }, "document editing surface and Home/File ribbon after optional OfficePLUS/Copilot pane dismissal");
+        }
+        catch (TimeoutException error)
+        {
+            throw new TimeoutException(
+                $"{error.Message} {lastState} Check failure screenshots/UI diagnostics for remaining task panes " +
+                "or add-ins hiding Office controls. No add-in was disabled or Office preference changed.", error);
+        }
         Window.Focus();
+    }
+
+    private bool HasEditingDocument()
+    {
+        if (appName != "PowerPoint")
+            return FindNativeSurfaceHandle(appName == "Word" ? "_WwG" : "EXCEL7") != IntPtr.Zero;
+        return ReadModel((scope, app) =>
+        {
+            dynamic presentations = scope.Track(app.Presentations);
+            if ((int)presentations.Count == 0)
+                return false;
+            dynamic presentation = scope.Track(app.ActivePresentation);
+            dynamic slides = scope.Track(presentation.Slides);
+            return (int)slides.Count > 0;
+        });
+    }
+
+    private (string Name, AutomationElement Host)[] KnownTaskPanes()
+    {
+        var result = new List<(string, AutomationElement)>();
+        foreach (var host in Window.FindAllDescendants(cf => cf.ByClassName("MsoWorkPane")))
+        {
+            if (host.Properties.ProcessId.ValueOrDefault != Application.ProcessId || !IsVisiblyOpen(host))
+                continue;
+            var marker = host.FindAllDescendants(cf => cf.ByClassName("NetUInetpane"))
+                .FirstOrDefault(e => OfficeStartup.IsKnownTaskPane(Class(e), Name(e)) && IsVisiblyOpen(e));
+            if (marker is not null)
+                result.Add((Name(marker), host));
+        }
+        return result.ToArray();
+    }
+
+    private void DismissKnownTaskPanes()
+    {
+        foreach (var name in KnownTaskPanes().Select(p => p.Name).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            OfficeStartup.CloseOptionalPane(name,
+                () => KnownTaskPanes().Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)),
+                () =>
+                {
+                    var panes = KnownTaskPanes().Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    if (panes.Length == 0)
+                        return true;
+                    if (panes.Length != 1)
+                        throw new InvalidOperationException($"Multiple {name} task panes found; refusing an ambiguous Close action.");
+                    return TryCloseTaskPane(name);
+                }, Wait, LogStartup);
+        }
+    }
+
+    private bool TryCloseTaskPane(string name)
+    {
+        // Office exposes a task pane's header separately from its content window.
+        var headers = Window.FindAllDescendants(cf => cf.ByClassName("NetUINativeHWNDHost"))
+            .Where(e => OfficeStartup.IsPaneHeader(Class(e), Name(e), name) &&
+                e.Properties.ProcessId.ValueOrDefault == Application.ProcessId &&
+                IsVisiblyOpen(e)).ToArray();
+        if (headers.Length == 0)
+            return false;
+        if (headers.Length != 1)
+            throw new InvalidOperationException($"Multiple {name} task pane headers found; refusing an ambiguous Close action.");
+        var header = headers[0];
+        var walker = Automation.TreeWalkerFactory.GetRawViewWalker();
+        foreach (var button in header.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)))
+        {
+            if (!IsVisiblyOpen(button) || !button.Properties.IsEnabled.ValueOrDefault ||
+                !OfficeStartup.IsPaneCloseButton(Name(button)))
+                continue;
+            var parent = walker.GetParent(button);
+            while (parent is not null && !parent.Equals(header) &&
+                Class(parent) is not ("OsfAxControl" or "WebView2Holder" or "Chrome_WidgetWin_1"))
+                parent = walker.GetParent(parent);
+            if (parent is null || !parent.Equals(header) || !button.Patterns.Invoke.IsSupported)
+                continue;
+            button.Patterns.Invoke.Pattern.Invoke();
+            return true;
+        }
+        return false;
+    }
+
+    private bool IsVisiblyOpen(AutomationElement element)
+    {
+        bool? offscreen = element.Properties.IsOffscreen.TryGetValue(out var value) ? value : null;
+        if (offscreen == true)
+            return false;
+        if (!element.Properties.BoundingRectangle.TryGetValue(out var bounds))
+            return false;
+        bool? nativeVisible = null;
+        if (element.Properties.NativeWindowHandle.TryGetValue(out var handle) && handle != 0)
+        {
+            var hwnd = new IntPtr(handle);
+            var owner = new IntPtr(Window.Properties.NativeWindowHandle.Value);
+            GetWindowThreadProcessId(hwnd, out var processId);
+            var className = new StringBuilder(256);
+            GetClassName(hwnd, className, className.Capacity);
+            if (className.ToString() == Class(element))
+            {
+                nativeVisible = processId == Application.ProcessId && IsChild(owner, hwnd) &&
+                    IsWindowVisible(hwnd) && !IsIconic(owner);
+            }
+        }
+        return OfficeStartup.IsVisiblyOpen(offscreen, nativeVisible, bounds, Window.BoundingRectangle);
     }
 
     private void DismissCloudOnboarding()
@@ -162,7 +301,7 @@ public sealed class OfficeSession : IDisposable
             return;
         var close = dialog.FindFirstDescendant(cf => cf.ByAutomationId("Close"))?.AsButton()
             ?? throw new InvalidOperationException("Cloud onboarding appeared without its Close button.");
-        NUnit.Framework.TestContext.Progress.WriteLine("Closing cloud-save onboarding without changing save preferences.");
+        LogStartup("Closing cloud-save onboarding without changing save preferences.");
         close.Invoke();
         Wait(() => !Elements().Any(e => Name(e) == "Cloud Create Onboarding"),
             "cloud onboarding to close");
@@ -214,6 +353,7 @@ public sealed class OfficeSession : IDisposable
         ClickDialogButton("Open", "\u6253\u5f00(O)", "\u6253\u5f00");
         Wait(() => Window.Title.Contains(Path.GetFileNameWithoutExtension(path), StringComparison.Ordinal),
             "opened file in title bar");
+        PrepareDocument();
     }
 
     public AutomationElement FileNameField()
@@ -292,19 +432,24 @@ public sealed class OfficeSession : IDisposable
         IntPtr found = IntPtr.Zero;
         Wait(() =>
         {
-            EnumChildWindows(new IntPtr(Window.Properties.NativeWindowHandle.Value), (handle, _) =>
-            {
-                var name = new StringBuilder(256);
-                GetClassName(handle, name, name.Capacity);
-                if (name.ToString() == className)
-                {
-                    found = handle;
-                    return false;
-                }
-                return true;
-            }, IntPtr.Zero);
+            found = FindNativeSurfaceHandle(className);
             return found != IntPtr.Zero;
         }, "native " + className + " object model surface");
+        return found;
+    }
+
+    private IntPtr FindNativeSurfaceHandle(string className)
+    {
+        var found = IntPtr.Zero;
+        EnumChildWindows(new IntPtr(Window.Properties.NativeWindowHandle.Value), (handle, _) =>
+        {
+            var name = new StringBuilder(256);
+            GetClassName(handle, name, name.Capacity);
+            if (name.ToString() != className)
+                return true;
+            found = handle;
+            return false;
+        }, IntPtr.Zero);
         return found;
     }
 
@@ -345,4 +490,19 @@ public sealed class OfficeSession : IDisposable
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr handle, StringBuilder className, int capacity);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
 }
